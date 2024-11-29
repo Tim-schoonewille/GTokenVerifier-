@@ -7,23 +7,28 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpResponse.BodyHandlers;
 import java.util.List;
 import nl.timschoonewille.gtokenverifier.exceptions.GoogleCertException;
+import nl.timschoonewille.gtokenverifier.models.CertResponse;
+import nl.timschoonewille.gtokenverifier.models.CertsWithExpiration;
 import nl.timschoonewille.gtokenverifier.models.GoogleCert;
+
 
 public class GoogleCertsProvider {
 
   private static final String CERT_URL = "https://www.googleapis.com/oauth2/v3/certs";
 
-  public static List<GoogleCert> getCerts() throws GoogleCertException {
-    String json = getCertsAsJsonString();
-    return convertJsonToObject(json);
+  public static CertsWithExpiration getCerts() throws GoogleCertException {
+    CertResponse response = getCertsResponse();
+    List<GoogleCert> certs = convertJsonToObject(response.rawCerts());
+    return new CertsWithExpiration(certs, response.expiresAt());
   }
 
-  private static String getCertsAsJsonString() throws GoogleCertException {
+  private static CertResponse getCertsResponse() throws GoogleCertException {
     HttpClient client = HttpClient.newHttpClient();
     HttpRequest request = HttpRequest.newBuilder(URI.create(CERT_URL))
         .GET()
@@ -31,7 +36,9 @@ public class GoogleCertsProvider {
     try {
       HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
       if (response.statusCode() == 200) {
-        return response.body();
+        var certResponse = CertResponse.create(response.body(),
+            extractCacheDurationFromHeader(response.headers()));
+        return certResponse;
       } else {
         throw new GoogleCertException("");
       }
@@ -55,5 +62,14 @@ public class GoogleCertsProvider {
     } catch (JsonProcessingException e) {
       throw new GoogleCertException("Can't convert JSON to GoogleCert object");
     }
+  }
+
+  private static int extractCacheDurationFromHeader(HttpHeaders headers)
+      throws GoogleCertException {
+    var cacheControl = headers.allValues("cache-control");
+    var maxAge = cacheControl.get(0)
+        .split(",")[1];
+    var age = maxAge.split("=")[1];
+    return Integer.parseInt(age);
   }
 }

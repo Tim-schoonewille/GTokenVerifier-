@@ -4,14 +4,16 @@ package nl.timschoonewille.gtokenverifier;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.security.interfaces.RSAPublicKey;
-import java.util.Arrays;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import nl.timschoonewille.gtokenverifier.exceptions.GoogleCertException;
 import nl.timschoonewille.gtokenverifier.exceptions.InvalidIdTokenException;
 import nl.timschoonewille.gtokenverifier.models.GoogleCert;
 import nl.timschoonewille.gtokenverifier.models.JwtComponents;
 import nl.timschoonewille.gtokenverifier.utils.GTokenUtils;
+import nl.timschoonewille.gtokenverifier.utils.GoogleCertsProvider;
 import org.jose4j.jwt.consumer.InvalidJwtException;
 import org.jose4j.jwt.consumer.JwtConsumer;
 import org.jose4j.jwt.consumer.JwtConsumerBuilder;
@@ -19,12 +21,12 @@ import org.jose4j.jwt.consumer.JwtConsumerBuilder;
 public class GTokenVerifier {
 
   private final String audience;
-  private final List<GoogleCert> certs;
   private final ObjectMapper objectMapper;
+  private List<GoogleCert> certs;
+  private LocalDateTime expiresOn;
 
-  GTokenVerifier(String audience, List<GoogleCert> certs) {
+  GTokenVerifier(String audience) {
     this.audience = audience;
-    this.certs = certs;
     objectMapper = new ObjectMapper();
   }
 
@@ -40,9 +42,8 @@ public class GTokenVerifier {
   Map<String, String> decode(String idToken, boolean throwExceptionOnInvalidAttribute,
       String... attributes)
       throws InvalidIdTokenException {
-    System.out.println(
-        "Attributes: " + Arrays.toString(attributes) + "[" + attributes.length + "]");
     try {
+      validateCerts();
       JwtComponents jwtComponents = JwtComponents.fromToken(idToken);
       String kid = GTokenUtils.retreiveKidFromHeader(objectMapper, jwtComponents);
       GoogleCert cert = GTokenUtils.assertCorrectCert(certs, kid);
@@ -94,5 +95,13 @@ public class GTokenVerifier {
       }
     }
     return payloadAttributes;
+  }
+
+  private void validateCerts() throws GoogleCertException {
+    if (expiresOn == null || expiresOn.isBefore(LocalDateTime.now())) {
+      var certsWithExpiration = GoogleCertsProvider.getCerts();
+      expiresOn = certsWithExpiration.expiresOn();
+      certs = certsWithExpiration.certs();
+    }
   }
 }
